@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>System Monitor – Projektdokumentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero" id="top">
+      <nav>
+        <a class="brand" href="#top">System Monitor</a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#architektur">Architektur</a>
+          <a href="#setup">Setup</a>
+          <a href="#konfiguration">Konfiguration</a>
+          <a href="#troubleshooting">Troubleshooting</a>
+        </div>
+      </nav>
+      <div class="hero-content">
+        <p class="eyebrow">Docker-basierte Hostüberwachung</p>
+        <h1>Systemmetriken sicher aus dem Container herauslesen</h1>
+        <p class="lead">
+          Der <strong>monitor</strong>-Service greift via Read-only-Mounts auf `/proc`, `/sys` und `/` zu, misst CPU-, RAM- und Disk-Auslastung und schreibt strukturierte Logberichte für Studien- und Produktionsumgebungen.
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#setup">Jetzt installieren</a>
+          <a class="btn ghost" href="#konfiguration">Log abrufen</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="features" class="section">
+        <div class="section-header">
+          <h2>Projektziele & Funktionsumfang</h2>
+          <p>Minimale Abhängigkeiten, nachvollziehbare Bash-Logik, klare Compose-Orchestrierung.</p>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <h3>Zuverlässige Basisüberwachung</h3>
+            <p>Zyklisches Logging von CPU-, Arbeitsspeicher- und Datenträgernutzung direkt aus Host-Mounts.</p>
+          </article>
+          <article class="card">
+            <h3>Hardening-by-Default</h3>
+            <p>Container läuft als non-root Benutzer `app`, Host-Resourcen werden nur read-only gemountet.</p>
+          </article>
+          <article class="card">
+            <h3>Healthcheck & Automatisierung</h3>
+            <p>Healthcheck prüft Log-Frische; optional lassen sich Cronjobs für Logrotation oder Restarts ergänzen.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="architektur" class="section">
+        <div class="section-header">
+          <h2>Architekturüberblick</h2>
+          <p>Eine schlanke Schicht aus Docker + Bash sorgt für reproduzierbare Messungen.</p>
+        </div>
+        <div class="diagram">
+          <pre><code>┌─────────────────────────────── Host ───────────────────────────────┐
+│ Docker Engine                                                      │
+│   └─ monitor (Container)                                           │
+│        ├─ monitor.sh  → holt CPU/RAM/Disk über /host_proc & df     │
+│        ├─ healthcheck.sh → validiert Log-Aktualität                │
+│        └─ /data → Log-Datei verbleibt im Container                 │
+└────────────────────────────────────────────────────────────────────┘</code></pre>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>Ordnerstruktur</h3>
+            <ul>
+              <li><code>Dockerfile</code> – Alpine + Bash + Benutzer `app`</li>
+              <li><code>docker-compose.yml</code> – Service, Mounts, Healthcheck</li>
+              <li><code>monitor.sh</code> – Messlogik & Logging</li>
+              <li><code>healthcheck.sh</code> – prüft Log-Frische</li>
+              <li><code>/data/system_monitor.log</code> – Ausgabedatei (im Container)</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Monitoring-Ablauf</h3>
+            <ol>
+              <li>Compose startet Container & Mounts Host-Daten.</li>
+              <li><code>monitor.sh</code> sammelt CPU-, RAM- und Diskwerte.</li>
+              <li>Daten landen im Log; Healthcheck prüft Aktualität.</li>
+              <li>Admins lesen Logs direkt oder erweitern sie per REST.</li>
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="details">
+        <div class="section-header">
+          <h2>Komponenten im Detail</h2>
+          <p>Dockerfile, Bash-Skripte, optionale Cronjobs und REST-Erweiterungen.</p>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>Dockerfile</h3>
+            <p>Erstellt ein Alpine-Image mit Bash, setzt ENV-Defaults und führt <code>monitor.sh</code> als Benutzer <code>app</code> aus.</p>
+            <pre><code>FROM alpine:3.20
+RUN apk add --no-cache bash
+COPY monitor.sh healthcheck.sh /app/
+USER app
+CMD ["bash", "/app/monitor.sh"]</code></pre>
+          </article>
+          <article class="card">
+            <h3>Bash- & Cronlogik</h3>
+            <p><code>monitor.sh</code> nutzt <code>/host_proc</code> für CPU/RAM und <code>df</code> für Datenträger. <code>healthcheck.sh</code> verwirft Container, wenn das Log älter als 2 Minuten ist. Cron kann optional Logrotation oder Compose-Restarts triggern.</p>
+            <pre><code>0 0 * * 0 docker compose exec -T monitor /usr/bin/truncate -s0 /data/system_monitor.log</code></pre>
+          </article>
+        </div>
+        <article class="card full">
+          <h3>REST-API (optional)</h3>
+          <p>Die Basisversion liefert nur Dateien. Für eigene Erweiterungen kann ein zweiter Service die Log-Datei lesen und Endpunkte wie <code>/metrics/latest</code> ausliefern – Compose muss dafür lediglich um einen REST-Container ergänzt werden.</p>
+        </article>
+      </section>
+
+      <section id="setup" class="section">
+        <div class="section-header">
+          <h2>Installation & Betrieb</h2>
+          <p>Wenige Kommandos reichen: bauen, starten, Logs im Container verfolgen.</p>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>Installation</h3>
+            <pre><code>git clone &lt;repo-url&gt;
+cd team_2_06
+docker compose build</code></pre>
+          </article>
+          <article class="card">
+            <h3>Start & Stop</h3>
+            <pre><code>docker compose up -d
+# … Monitoring läuft
+
+docker compose down    # Stop
+
+docker compose ps      # Status</code></pre>
+          </article>
+        </div>
+        <article class="card full">
+          <h3>Beispiel-Logausgabe</h3>
+          <pre><code>Systemüberwachungsbericht - 2025-11-20 21:25:46 (a17f911706b3)
+----------------------------------------------
+CPU-Nutzung:        6.57%
+Speichernutzung:    29.74%
+Datenträgernutzung: 98%</code></pre>
+        </article>
+      </section>
+
+      <section id="konfiguration" class="section">
+        <div class="section-header">
+          <h2>Konfiguration</h2>
+          <p>Alle Stellschrauben werden via Compose-Env und Bind-Mounts gesetzt.</p>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <caption>Umgebungsvariablen</caption>
+            <thead>
+              <tr>
+                <th>Variable</th>
+                <th>Standard</th>
+                <th>Beschreibung</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>INTERVAL</code></td>
+                <td>10</td>
+                <td>Messintervall in Sekunden.</td>
+              </tr>
+              <tr>
+                <td><code>LOG_FILE</code></td>
+                <td>/data/system_monitor.log</td>
+                <td>Pfad im Container – standardmäßig ohne Host-Mount.</td>
+              </tr>
+              <tr>
+                <td><code>HOST_PROC</code></td>
+                <td>/host_proc</td>
+                <td>Read-only-Mount von <code>/proc</code>.</td>
+              </tr>
+              <tr>
+                <td><code>HOST_SYS</code></td>
+                <td>/host_sys</td>
+                <td>Read-only-Mount von <code>/sys</code>.</td>
+              </tr>
+              <tr>
+                <td><code>HOST_ROOT</code></td>
+                <td>/host_root</td>
+                <td>Read-only-Mount des Host-Dateisystems für <code>df</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <caption>Volumes & Ports</caption>
+            <thead>
+              <tr>
+                <th>Host</th>
+                <th>Container</th>
+                <th>Zweck</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/proc</code></td>
+                <td><code>/host_proc (ro)</code></td>
+                <td>CPU/RAM-Daten.</td>
+              </tr>
+              <tr>
+                <td><code>/sys</code></td>
+                <td><code>/host_sys (ro)</code></td>
+                <td>Erweiterbare Sensorschnittstelle.</td>
+              </tr>
+              <tr>
+                <td><code>/</code></td>
+                <td><code>/host_root (ro)</code></td>
+                <td>Datenträgerstatistiken via <code>df</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">Hinweis: Es werden keine Netzwerk-Ports veröffentlicht – Auswertungen erfolgen direkt über die Log-Datei oder optionale REST-Adapter.</p>
+      </section>
+
+      <section id="troubleshooting" class="section">
+        <div class="section-header">
+          <h2>Troubleshooting</h2>
+          <p>Typische Fehlerbilder und Sofortmaßnahmen.</p>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Problem</th>
+                <th>Diagnose</th>
+                <th>Fix</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Container ist <em>unhealthy</em></td>
+                <td><code>docker ps</code> zeigt Status nach Healthcheck</td>
+                <td>Mit <code>docker compose exec -T monitor ls -l /data</code> prüfen, ob das Log existiert und frisch ist.</td>
+              </tr>
+              <tr>
+                <td>Log bleibt leer</td>
+                <td>Keine neuen Einträge in <code>/data/system_monitor.log</code></td>
+                <td><code>docker compose logs monitor</code> prüfen; sicherstellen, dass <code>/host_proc</code> und <code>/host_root</code> gemountet sind.</td>
+              </tr>
+              <tr>
+                <td>CPU=0%</td>
+                <td><code>/host_proc</code> nicht verfügbar</td>
+                <td>Compose-File prüfen, Container neu starten.</td>
+              </tr>
+              <tr>
+                <td>Disk zeigt Fehler</td>
+                <td><code>df</code> meldet Permission denied</td>
+                <td>Sicherstellen, dass `/` als read-only Mount vorhanden ist.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>System Monitor · Docker · Bash · Compose · Healthcheck</p>
+      <p><a href="#top">Zurück nach oben</a></p>
+    </footer>
+  </body>
+</html>
