@@ -1,0 +1,5 @@
+bash>=5.1
+docker>=24.0
+docker-compose>=2.21
+postgresql-client>=16
+grafana>=11.3

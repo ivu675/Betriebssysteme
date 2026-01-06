@@ -1,35 +1,121 @@
 #!/usr/bin/env bash
-# author: <dein Name>       version: 1.0
-#
-# Einfaches System-Monitoring-Skript, gedacht für den Einsatz in einem Container.
-# Liest CPU-, Speicher- und Plattenauslastung vom Host aus und schreibt regelmäßig
-# einen kleinen Bericht ins Log.
-#
-# - INTERVAL:    Abstand zwischen zwei Messungen (Sekunden).
-# - LOG_FILE:    Wohin geschrieben wird (Standard: stdout).
-# - HOST_PROC:   Pfad zum /proc des Hosts (wird vom Container hineingemountet).
-# - HOST_SYS:    Reserve für /sys vom Host (aktuell nicht genutzt).
-# - HOST_ROOT:   Wurzelverzeichnis des Host-Dateisystems (für df).
-#
-# Ablauf in Kurzform:
-# - cpu_usage():   Liest zweimal /proc/stat und berechnet daraus die CPU-Auslastung.
-# - mem_usage():   Nutzt MemTotal und MemAvailable aus /proc/meminfo und berechnet
-#                  die Speicherbelegung in Prozent.
-# - disk_usage():  Fragt per df die Belegung des gemounteten Host-Root-Dateisystems ab.
-# - log_once():    Baut einen kleinen Textbericht zusammen und hängt ihn an LOG_FILE an.
-#                  Zusätzlich wird eine Heartbeat-Datei aktualisiert, die vom
-#                  Healthcheck-Skript ausgewertet wird.
-# - Hauptloop:     Ruft log_once in einer Endlosschleife auf und wartet jeweils INTERVAL Sekunden.
-
 set -Eeuo pipefail
 
-INTERVAL="${INTERVAL:-60}"                     # Sekunden zwischen Messungen
-LOG_FILE="${LOG_FILE:-/dev/stdout}"            # Standard: stdout statt Datei
+INTERVAL="${INTERVAL:-60}"
+LOG_FILE="${LOG_FILE:-/data/system_monitor.log}"
 HOST_PROC="${HOST_PROC:-/host_proc}"
 HOST_SYS="${HOST_SYS:-/host_sys}"
 HOST_ROOT="${HOST_ROOT:-/host_root}"
+DB_ENABLED="${DB_ENABLED:-true}"
+DB_HOST="${DB_HOST:-db}"
+DB_PORT="${DB_PORT:-5432}"
+DB_NAME="${DB_NAME:-monitor}"
+DB_USER="${DB_USER:-monitor}"
+DB_PASSWORD="${DB_PASSWORD:-monitor}"
+RUN_ONCE=false
 
-mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+usage() {
+  cat <<'EOF'
+System Monitor
+
+Usage: monitor.sh [options]
+
+Options:
+  -i, --interval <seconds>   Messintervall (>=1)
+  -l, --log-file <path>      Logdatei ("-" für stdout)
+      --db-host <host>       Datenbank-Host
+      --db-port <port>       Datenbank-Port
+      --db-name <name>       Datenbank-Name
+      --db-user <user>       Datenbank-Benutzer
+      --db-password <pw>     Datenbank-Passwort
+      --no-db                Deaktiviert DB-Schreibvorgänge
+      --once                 Nur eine Messung ausführen
+  -h, --help                 Hilfe anzeigen
+EOF
+}
+
+err_exit() {
+  echo "ERROR: $1" >&2
+  exit "${2:-1}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i|--interval)
+      [[ -n "${2:-}" ]] || err_exit "--interval benötigt einen Wert" 64
+      INTERVAL="$2"
+      shift 2
+      ;;
+    -l|--log-file)
+      [[ -n "${2:-}" ]] || err_exit "--log-file benötigt einen Pfad" 64
+      LOG_FILE="$2"
+      shift 2
+      ;;
+    --db-host)
+      [[ -n "${2:-}" ]] || err_exit "--db-host benötigt einen Wert" 64
+      DB_HOST="$2"
+      shift 2
+      ;;
+    --db-port)
+      [[ -n "${2:-}" ]] || err_exit "--db-port benötigt einen Wert" 64
+      DB_PORT="$2"
+      shift 2
+      ;;
+    --db-name)
+      [[ -n "${2:-}" ]] || err_exit "--db-name benötigt einen Wert" 64
+      DB_NAME="$2"
+      shift 2
+      ;;
+    --db-user)
+      [[ -n "${2:-}" ]] || err_exit "--db-user benötigt einen Wert" 64
+      DB_USER="$2"
+      shift 2
+      ;;
+    --db-password)
+      [[ -n "${2:-}" ]] || err_exit "--db-password benötigt einen Wert" 64
+      DB_PASSWORD="$2"
+      shift 2
+      ;;
+    --no-db)
+      DB_ENABLED="false"
+      shift
+      ;;
+    --once)
+      RUN_ONCE=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      usage >&2
+      err_exit "Unbekannte Option: $1" 64
+      ;;
+    *)
+      usage >&2
+      err_exit "Unerwartetes Argument: $1" 64
+      ;;
+  esac
+done
+
+if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
+  err_exit "Intervall muss eine positive Ganzzahl sein" 65
+fi
+
+if ! [[ "$DB_PORT" =~ ^[0-9]+$ ]] || [ "$DB_PORT" -lt 1 ]; then
+  err_exit "DB-Port muss eine positive Ganzzahl sein" 66
+fi
+
+if [[ "$LOG_FILE" == "-" ]]; then
+  LOG_FILE="/dev/stdout"
+else
+  mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || err_exit "Log-Verzeichnis konnte nicht erstellt werden"
+fi
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 
@@ -69,29 +155,66 @@ disk_usage() {
   printf "%s" "$pct"
 }
 
+send_to_db() {
+  if [[ "${DB_ENABLED,,}" != "true" ]]; then
+    return 0
+  fi
+
+  local ts="$1" host="$2" cpu="$3" mem="$4" disk="$5"
+  local escaped_host="${host//\'/\'\'}"
+  local sql="\
+    CREATE TABLE IF NOT EXISTS metrics (
+      id SERIAL PRIMARY KEY,
+      recorded_at TIMESTAMPTZ NOT NULL,
+      hostname TEXT NOT NULL,
+      cpu_usage NUMERIC(5,2) NOT NULL,
+      mem_usage NUMERIC(5,2) NOT NULL,
+      disk_usage NUMERIC(5,2) NOT NULL
+    );
+    INSERT INTO metrics (recorded_at, hostname, cpu_usage, mem_usage, disk_usage)
+    VALUES ('${ts}'::timestamptz, '${escaped_host}', ${cpu}, ${mem}, ${disk});
+  "
+
+  if ! PGPASSWORD="$DB_PASSWORD" psql \
+    --host="$DB_HOST" \
+    --port="$DB_PORT" \
+    --username="$DB_USER" \
+    --dbname="$DB_NAME" \
+    --command "$sql" >/dev/null 2>&1; then
+    echo "WARN: Schreiben in die Datenbank fehlgeschlagen" >&2
+  fi
+}
+
 log_once() {
-  local ts host cpu mem disk
-  ts="$(date "+%Y-%m-%d %H:%M:%S")"
+  local ts host cpu mem disk disk_clean
+  ts="$(timestamp)"
   host="$(hostname)"
   cpu="$(cpu_usage)"
   mem="$(mem_usage)"
   disk="$(disk_usage)"
+  disk_clean="${disk//%/}"
+  [ -z "$disk_clean" ] && disk_clean="0"
 
   {
-    echo "Systemüberwachungsbericht - ${ts} (${host})"
+    echo "Systemueberwachungsbericht - ${ts} (${host})"
     echo "----------------------------------------------"
     echo "CPU-Nutzung:        ${cpu}%"
     echo "Speichernutzung:    ${mem}%"
-    echo "Datenträgernutzung: ${disk}"
+    echo "Datentraegernutzung: ${disk}"
     echo
-  } >> "$LOG_FILE"
+  } | tee -a "$LOG_FILE"
 
-  # Heartbeat für Healthcheck – unabhängig vom Log-Ziel
+  send_to_db "$ts" "$host" "$cpu" "$mem" "$disk_clean"
+
   touch /tmp/system_monitor_heartbeat || true
 }
 
-# Hauptloop
 while true; do
-  log_once
+  if ! log_once; then
+    err_exit "Messung fehlgeschlagen" 70
+  fi
+  if [ "$RUN_ONCE" = true ]; then
+    break
+  fi
   sleep "$INTERVAL"
 done

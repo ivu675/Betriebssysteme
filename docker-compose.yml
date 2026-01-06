@@ -1,43 +1,42 @@
-# author: <dein Name>    version: 1.0
-#
-# docker-compose-Konfiguration für den Monitoring-Dienst.
-#
-# Zweck:
-# - startet einen Container, der einfache Systemwerte vom Host (CPU, RAM, Disk)
-#   ausliest und protokolliert
-# - dazu werden /proc, /sys und das Root-Dateisystem des Hosts nur-lesend
-#   in den Container gemountet
-# - das INTERVAL legt fest, wie oft gemessen und geloggt wird
-# - der Healthcheck ruft regelmäßig healthcheck.sh auf und markiert den
-#   Container als "healthy" oder "unhealthy", je nachdem ob das Monitoring
-#   noch Heartbeats schreibt
-
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitor
+      POSTGRES_DB: monitor
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   monitor:
     build: .
-    image: team_2_06-monitor        
-    container_name: monitor
-
+    image: team_2_06-monitor
     environment:
-      # Abstand in Sekunden zwischen zwei Messungen
       INTERVAL: "60"
-
-      # Zielpfad für die Host-Sichten innerhalb des Containers
-      #LOG_FILE: "/data/system_monitor.log"
+      LOG_FILE: "/data/system_monitor.log"
       HOST_PROC: "/host_proc"
       HOST_SYS: "/host_sys"
       HOST_ROOT: "/host_root"
-
-    # Host-Verzeichnisse, die der Container lesen darf
+      DB_ENABLED: "true"
+      DB_HOST: "db"
+      DB_PORT: "5432"
+      DB_NAME: "monitor"
+      DB_USER: "monitor"
+      DB_PASSWORD: "monitor"
     volumes:
-      - /proc:/host_proc:ro       # Host-/proc read-only
-      - /sys:/host_sys:ro         # Host-/sys read-only
-      - /:/host_root:ro           # komplettes Host-Root read-only
-
-    # Container automatisch neu starten, solange nicht bewusst gestoppt
+      - /proc:/host_proc:ro
+      - /sys:/host_sys:ro
+      - /:/host_root:ro
+      - ./logs:/data
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
-
-    # Healthcheck für den Container-Zustand
     healthcheck:
       test: ["CMD", "bash", "/app/healthcheck.sh"]
       interval: 30s
@@ -45,3 +44,22 @@ services:
       retries: 3
       start_period: 10s
 
+  grafana:
+    image: grafana/grafana-oss:11.3.0
+    environment:
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: change-me-now
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  grafana-data:

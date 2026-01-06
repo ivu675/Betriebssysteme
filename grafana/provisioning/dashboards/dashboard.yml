@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: system-monitor
+    folder: System Monitor
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

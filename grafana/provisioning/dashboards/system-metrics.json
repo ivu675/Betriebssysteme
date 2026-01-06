@@ -1,0 +1,70 @@
+{
+  "id": null,
+  "title": "System Metrics",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "CPU / RAM / Disk",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", cpu_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "CPU"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", mem_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "RAM"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", disk_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "Disk"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Latest Measurements",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "table",
+          "rawSql": "SELECT recorded_at, hostname, cpu_usage, mem_usage, disk_usage FROM metrics WHERE ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at DESC LIMIT 20"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "Host",
+        "label": "Hostname",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+        "definition": "SELECT DISTINCT hostname FROM metrics ORDER BY 1",
+        "query": "SELECT DISTINCT hostname FROM metrics ORDER BY 1",
+        "includeAll": true,
+        "allValue": "__all",
+        "multi": false,
+        "refresh": 1,
+        "sort": 1
+      }
+    ]
+  }
+}
