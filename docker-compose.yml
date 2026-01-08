@@ -28,6 +28,13 @@ services:
       DB_NAME: "monitor"
       DB_USER: "monitor"
       DB_PASSWORD: "monitor"
+
+      # HOST-INTEGRATION
+    # Was:   Mountet Host-Verzeichnisse (/proc, /sys) in den Container.
+    # Wozu:  Ermöglicht dem isolierten Container den Zugriff auf Host-Metriken.
+    # Warum: ':ro' (Read-Only) ist entscheidend für Sicherheit – der Container kann gucken,
+    #        [cite_start]aber nichts am Host-System kaputt machen. [cite: 150, 151]
+    
     volumes:
       - /proc:/host_proc:ro
       - /sys:/host_sys:ro

@@ -8,6 +8,18 @@ DB_NAME="${DB_NAME:-monitor}"
 DB_USER="${DB_USER:-monitor}"
 DB_PASSWORD="${DB_PASSWORD:-monitor}"
 
+# BEFEHL: stream
+# Was:   Wrapper um 'tail -f' auf die Log-Datei.
+# Wozu:  Anzeige der Logeinträge in Echtzeit im Terminal.
+# Warum: Erfüllt die Advanced-Anforderung "Echtzeit-Streaming".
+#        [cite_start]Parameter wie --lines machen es flexibel wie native Linux-Tools. [cite: 9, 10, 12]
+
+# BEFEHL: query
+# Was:   Baut dynamisch eine SQL-Abfrage basierend auf CLI-Flags (--host, --min, etc.).
+# Wozu:  Ermöglicht Suche und Filterung historischer Daten ohne SQL-Kenntnisse.
+# Warum: Erfüllt "Such- und Filterfunktionen über CLI". Nutzt psql Format-Optionen (--pset)
+#        [cite_start]für Ausgabe als CSV/JSON/Table, ideal für Weiterverarbeitung (Piping). [cite: 18, 28, 30]
+
 usage() {
   cat <<'EOF'
 monitorctl - Werkzeug zur Auswertung der Systemmetriken

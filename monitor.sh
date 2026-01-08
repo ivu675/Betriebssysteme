@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# KONFIGURATION & INITIALISIERUNG
+# Was:   Definition von Variablen mit Default-Werten (Syntax ${VAR:-Default}).
+# Wozu:  Ermöglicht Konfiguration von außen über Umgebungsvariablen (ENV).
+# Warum: Container-Best-Practice (12-Factor App). Werte müssen via Docker Compose injizierbar sein,
+#        ohne das Skript zu ändern. [cite_start]Fallbacks garantieren Lauffähigkeit auch ohne Config. [cite: 153, 154, 155]
+
 INTERVAL="${INTERVAL:-60}"
 LOG_FILE="${LOG_FILE:-/data/system_monitor.log}"
 HOST_PROC="${HOST_PROC:-/host_proc}"
@@ -119,6 +125,13 @@ fi
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 
+# METHODE: cpu_usage
+# Was:   Liest /host_proc/stat, wartet kurz (sleep 1), liest erneut und berechnet das Delta.
+# Wozu:  Ermittlung der aktuellen CPU-Auslastung in Prozent.
+# Warum: 1. Linux /proc/stat liefert kumulierte Ticks seit Boot -> Last ist immer eine Differenz über Zeit.
+#        2. Zugriff auf /host_proc (Mount) statt /proc, um die echte Host-CPU zu messen, nicht nur den Container.
+#        [cite_start]3. awk wird für Fließkomma-Berechnung genutzt, da Bash nur Integer kann. [cite: 180, 181]
+
 cpu_usage() {
   read -r _ u1 n1 s1 i1 w1 irq1 sirq1 st1 g1 gn1 < <(head -n1 "${HOST_PROC}/stat")
   sleep 1
@@ -140,6 +153,12 @@ cpu_usage() {
   awk -v td="$totald" -v id="$idled" 'BEGIN { printf "%.2f", (td - id) * 100.0 / td }'
 }
 
+# METHODE: mem_usage
+# Was:   Parst 'MemTotal' und 'MemAvailable' aus /host_proc/meminfo.
+# Wozu:  Berechnung des prozentual belegten Arbeitsspeichers.
+# Warum: 'MemAvailable' ist präziser als 'MemFree', da es Caches berücksichtigt, die bei Bedarf frei werden.
+#        [cite_start]Direktes Parsing im Stream spart Ressourcen. [cite: 181, 182]
+
 mem_usage() {
   awk '
     $1=="MemTotal:"     {t=$2}
@@ -148,12 +167,24 @@ mem_usage() {
   ' "${HOST_PROC}/meminfo"
 }
 
+# METHODE: disk_usage
+# Was:   Führt 'df -h' auf dem gemounteten Host-Root-Verzeichnis aus.
+# Wozu:  Ermittlung des Füllstands der Festplatte.
+# Warum: Zugriff muss auf /host_root erfolgen. Ein einfaches 'df /' würde nur das Overlay-FS
+#        [cite_start]des Containers messen, was für Host-Monitoring nutzlos wäre. [cite: 182]
+
 disk_usage() {
   pct="$(df -h "${HOST_ROOT}" 2>/dev/null | awk 'NR>1 {print $5; exit}')"
   [ -z "$pct" ] && pct="$(df -h "${HOST_ROOT}/." 2>/dev/null | awk 'NR>1 {print $5; exit}')"
   [ -z "$pct" ] && pct="$(df -h / 2>/dev/null | awk 'NR>1 {print $5; exit}')"
   printf "%s" "$pct"
 }
+
+# METHODE: send_to_db
+# Was:   Erstellt einen SQL-String und sendet ihn via 'psql' an die Datenbank.
+# Wozu:  Persistente Speicherung der Messwerte (Advanced-Anforderung).
+# Warum: Nutzung von 'postgresql-client' (Alpine Paket) statt schwerer ORM-Bibliotheken hält das Image klein.
+#        [cite_start]Manuelles Escaping der Hostnamen verhindert simple SQL-Injection-Fehler. [cite: 182, 183, 184, 185]
 
 send_to_db() {
   if [[ "${DB_ENABLED,,}" != "true" ]]; then
@@ -184,6 +215,12 @@ send_to_db() {
     echo "WARN: Schreiben in die Datenbank fehlgeschlagen" >&2
   fi
 }
+
+# METHODE: log_once
+# Was:   Sammelt alle Werte, schreibt Log, triggert DB-Export und aktualisiert Heartbeat.
+# Wozu:  Zentrale Steuerfunktion für einen einzelnen Messzyklus.
+# Warum: Erfüllt Basic (Log-Datei) und Advanced (DB) gleichzeitig.
+#        [cite_start]Erzeugt '/tmp/system_monitor_heartbeat', damit der Healthcheck weiß, dass der Loop noch lebt. [cite: 186, 187]
 
 log_once() {
   local ts host cpu mem disk disk_clean

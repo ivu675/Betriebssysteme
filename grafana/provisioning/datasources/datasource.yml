@@ -1,5 +1,15 @@
 apiVersion: 1
 
+# DATENQUELLEN-PROVISIONIERUNG
+# Was:   Definiert die Verbindung zur PostgreSQL-Datenbank "monitor".
+# Wozu:  Automatisierung (IaC - Infrastructure as Code). Erspart das manuelle Einrichten
+#        der Datenbankverbindung über die Grafana-GUI nach jedem Container-Neustart.
+# Warum:
+# 1. url: db:5432 -> Nutzt den internen Docker-DNS-Namen des Services "db" (siehe docker-compose.yml).
+#    Da beide im selben Docker-Netzwerk liegen, finden sie sich ohne IP-Adresse.
+# 2. isDefault: true -> Panels nutzen diese DB automatisch, ohne dass man sie jedes Mal auswählen muss.
+# 3. editable: false -> Verhindert, dass jemand versehentlich die Config im Dashboard ändert (Sicherheit).
+
 datasources:
   - name: SystemMetrics
     uid: SystemMetrics

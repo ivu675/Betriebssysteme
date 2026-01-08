@@ -1,0 +1,107 @@
+# DASHBOARD-BASISKONFIGURATION
+# Was:   Setzt Titel, Zeitzone (Browser) und Refresh-Rate (5s).
+# Wozu:  Grundlegendes Verhalten des Dashboards steuern.
+# Warum:
+# 1. "refresh": "5s" -> Erfüllt die Advanced-Anforderung "Echtzeit-Updates".
+#    Der Browser holt alle 5 Sekunden neue Daten, ohne Page-Reload.
+# 2. "timezone": "browser" -> Verhindert Verwirrung durch Zeitverschiebung (UTC vs. Lokalzeit).
+
+{
+  "id": null,
+  "title": "System Metrics",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    {
+
+        # SQL-ABFRAGE FÜR DIAGRAMME
+        # Was:   Lädt Zeitstempel, Werte und Hostnamen für die grafische Kurve.
+        # Wozu:  Visualisierung des Verlaufs (CPU/RAM/Disk) über die Zeit.
+        # Warum:
+        # 1. AS "time": Grafana benötigt zwingend eine Spalte namens "time" für die X-Achse.
+        # 2. $__timeFilter(recorded_at): Ein Makro, das nur Daten für den aktuell gezoomten
+        #    Zeitraum lädt (Performance-Optimierung statt Full-Table-Scan).
+        # 3. '${Host:raw}'='__all'...: Die Logik für den Dropdown-Filter. Zeigt entweder
+        #    alle Hosts oder nur den ausgewählten.
+
+      "type": "timeseries",
+      "title": "CPU / RAM / Disk",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", cpu_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "CPU"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", mem_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "RAM"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at AS \"time\", disk_usage AS value, hostname AS metric FROM metrics WHERE $__timeFilter(recorded_at) AND ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at",
+          "alias": "Disk"
+        }
+      ]
+    },
+    {
+
+        # SQL-ABFRAGE FÜR TABELLE
+        # Was:   Lädt die Rohdaten sortiert nach Zeit (neueste zuerst), limitiert auf 20.
+        # Wozu:  Detailansicht der exakten Werte ("Latest Measurements").
+        # Warum:
+        # 1. LIMIT 20: Verhindert, dass die Tabelle tausende Zeilen lädt und den Browser verlangsamt.
+        # 2. ORDER BY ... DESC: Der Nutzer will immer den aktuellsten Zustand oben sehen.
+
+      "type": "table",
+      "title": "Latest Measurements",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+          "format": "table",
+          "rawSql": "SELECT recorded_at, hostname, cpu_usage, mem_usage, disk_usage FROM metrics WHERE ('${Host:raw}'='__all' OR hostname='${Host:raw}') ORDER BY recorded_at DESC LIMIT 20"
+        }
+      ]
+    }
+  ],
+
+# FILTER-VARIABLEN (DROPDOWN)
+# Was:   Definiert die Variable "Host" durch eine SQL-Abfrage (SELECT DISTINCT hostname).
+# Wozu:  Erzeugt das Dropdown-Menü oben links zum Filtern nach Containern.
+# Warum:
+# 1. "refresh": 1 -> Aktualisiert die Liste beim Laden des Dashboards. Neue Container
+#    tauchen automatisch auf (Dynamik).
+# 2. "includeAll": true -> Erlaubt die Auswahl "All", um die Flotte global zu sehen.
+#    Erfüllt die Anforderung "Such- und Filterfunktionen".
+
+  "templating": {
+    "list": [
+      {
+        "name": "Host",
+        "label": "Hostname",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "SystemMetrics" },
+        "definition": "SELECT DISTINCT hostname FROM metrics ORDER BY 1",
+        "query": "SELECT DISTINCT hostname FROM metrics ORDER BY 1",
+        "includeAll": true,
+        "allValue": "__all",
+        "multi": false,
+        "refresh": 1,
+        "sort": 1
+      }
+    ]
+  }
+}

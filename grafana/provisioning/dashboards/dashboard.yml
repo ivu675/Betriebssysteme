@@ -1,5 +1,15 @@
 apiVersion: 1
 
+# DASHBOARD-PROVISIONIERUNG
+# Was:   Registriert einen "Provider", der Ordner nach Dashboard-Dateien scannt.
+# Wozu:  Sorgt dafür, dass das Dashboard "System Metrics" beim Start von Grafana
+#        sofort geladen wird ("Pre-loaded").
+# Warum:
+# 1. type: file -> Lädt Konfigurationen direkt vom Dateisystem (statisch), statt aus einer Datenbank.
+# 2. disableDeletion: true -> Verhindert, dass das Dashboard in der GUI gelöscht werden kann.
+#    Das erzwingt "Single Source of Truth" (die Datei ist die Wahrheit).
+# 3. updateIntervalSeconds -> (Optional) Würde Änderungen an der Datei live neu laden.
+
 providers:
   - name: system-monitor
     folder: System Monitor

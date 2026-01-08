@@ -2,6 +2,12 @@ FROM alpine:3.20
 
 RUN apk add --no-cache bash postgresql-client su-exec
 
+# SICHERHEIT & HARDENING
+# Was:   Erstellt einen dedizierten User 'app' und nutzt 'alpine' als Basis.
+# Wozu:  Minimale und sichere Laufzeitumgebung bereitstellen.
+# Warum: 'USER app' verhindert, dass der Container als Root läuft (Sicherheitsrisiko).
+#        [cite_start]Alpine ist extrem klein (<10MB) und reduziert die Angriffsfläche. [cite: 153]
+
 RUN addgroup -g 10001 app && adduser -D -u 10001 -G app app
 
 WORKDIR /app
